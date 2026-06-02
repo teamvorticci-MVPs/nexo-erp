@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import { useParams } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -9,11 +9,11 @@ import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
   ArrowLeft, Users, Package, TrendingUp,
-  CheckCircle, XCircle, Loader2, Edit2, Save, X,
+  CheckCircle, XCircle, Loader2, Edit2, Save, X, ImageIcon, Upload,
 } from 'lucide-react'
 import Link from 'next/link'
 import {
-  getTenant, getTenantProducts, toggleTenantStatus, updateTenantInfo,
+  getTenant, getTenantProducts, toggleTenantStatus, updateTenantInfo, uploadTenantLogo,
   type TenantDetail, type ProductRow,
 } from '@/app/actions/superadmin'
 import type { User } from '@/types/database'
@@ -60,6 +60,89 @@ function StatusBadge({ active }: { active: boolean }) {
     <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
       {active ? 'Activo' : 'Inactivo'}
     </span>
+  )
+}
+
+function LogoUpload({
+  tenantId,
+  currentUrl,
+  onUploaded,
+}: {
+  tenantId: string
+  currentUrl: string | null
+  onUploaded: (url: string) => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [preview, setPreview] = useState<string | null>(currentUrl)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  const handleChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (file.size > 2 * 1024 * 1024) {
+      setUploadError('El archivo no puede superar los 2 MB')
+      return
+    }
+
+    setUploadError(null)
+    setPreview(URL.createObjectURL(file))
+    setUploading(true)
+
+    const r = await uploadTenantLogo(tenantId, file)
+    setUploading(false)
+
+    if (r.error) {
+      setUploadError(r.error)
+      setPreview(currentUrl)
+      return
+    }
+
+    onUploaded(r.data!.logo_url)
+  }
+
+  return (
+    <div className="mb-5 flex items-center gap-4 border-b border-gray-100 pb-5">
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="relative flex size-16 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 transition-colors hover:border-blue-400 hover:bg-blue-50"
+      >
+        {preview ? (
+          <img src={preview} alt="Logo" className="size-full object-cover" />
+        ) : (
+          <ImageIcon className="size-6 text-gray-300" />
+        )}
+        {uploading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white/70">
+            <Loader2 className="size-4 animate-spin text-blue-500" />
+          </div>
+        )}
+      </button>
+
+      <div>
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          className="flex items-center gap-1.5 text-sm font-medium text-blue-500 hover:text-blue-600 disabled:opacity-50"
+        >
+          <Upload className="size-3.5" />
+          {preview ? 'Cambiar logo' : 'Subir logo'}
+        </button>
+        <p className="mt-0.5 text-xs text-gray-400">PNG, JPG o SVG · máx. 2 MB</p>
+        {uploadError && <p className="mt-0.5 text-xs text-red-500">{uploadError}</p>}
+      </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleChange}
+      />
+    </div>
   )
 }
 
@@ -208,6 +291,15 @@ export default function TenantDetailPage() {
       {/* ── Tab: Info ─────────────────────────────────────────────────────── */}
       {activeTab === 'info' && (
         <div className="rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-sm sm:p-5">
+
+          <LogoUpload
+            tenantId={id}
+            currentUrl={tenant.logo_url ?? null}
+            onUploaded={(url) =>
+              setDetail(prev => prev ? { ...prev, tenant: { ...prev.tenant, logo_url: url } } : prev)
+            }
+          />
+
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-900">Información del negocio</h2>
             {!isEditing

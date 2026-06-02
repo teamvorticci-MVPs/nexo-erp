@@ -288,6 +288,45 @@ export async function getTenantProducts(
   }
 }
 
+// ─── uploadTenantLogo ─────────────────────────────────────────────────────────
+
+export async function uploadTenantLogo(
+  tenantId: string,
+  file: File,
+): Promise<ActionResult<{ logo_url: string }>> {
+  try {
+    await assertSuperadmin()
+    const admin = getAdmin()
+
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? 'jpg'
+    const path = `${tenantId}/logo.${ext}`
+
+    const { error: uploadError } = await admin.storage
+      .from('tenant-logos')
+      .upload(path, file, { upsert: true, contentType: file.type })
+
+    if (uploadError) return { error: uploadError.message }
+
+    const { data: { publicUrl } } = admin.storage
+      .from('tenant-logos')
+      .getPublicUrl(path)
+
+    // Cache-buster so updated logos load immediately
+    const logo_url = `${publicUrl}?t=${Date.now()}`
+
+    const { error: updateError } = await admin
+      .from('tenants')
+      .update({ logo_url })
+      .eq('id', tenantId)
+
+    if (updateError) return { error: updateError.message }
+
+    return { data: { logo_url } }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
 // ─── bulkImportProducts ───────────────────────────────────────────────────────
 
 export type ProductImportRow = {
