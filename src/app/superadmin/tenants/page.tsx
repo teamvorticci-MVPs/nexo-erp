@@ -5,15 +5,11 @@ import Link from 'next/link'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
-  Building2, Users, Package, TrendingUp,
-  Plus, ChevronRight, Loader2, CheckCircle, XCircle, Search,
+  Plus, ChevronRight, Loader2, CheckCircle, XCircle, Search, Package, Users,
 } from 'lucide-react'
 import { getTenants, toggleTenantStatus, type TenantRow } from '@/app/actions/superadmin'
 
-const fmt = (n: number) =>
-  new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n)
-
-export default function SuperadminDashboard() {
+export default function TenantsPage() {
   const [tenants, setTenants]   = useState<TenantRow[]>([])
   const [filtered, setFiltered] = useState<TenantRow[]>([])
   const [query, setQuery]       = useState('')
@@ -22,16 +18,15 @@ export default function SuperadminDashboard() {
   const [toggling, setToggling] = useState<string | null>(null)
   const [, startT] = useTransition()
 
-  const load = async () => {
+  useEffect(() => {
     setLoading(true)
-    const r = await getTenants()
-    setLoading(false)
-    if (r.error) { setError(r.error); return }
-    setTenants(r.data ?? [])
-    setFiltered(r.data ?? [])
-  }
-
-  useEffect(() => { load() }, [])
+    getTenants().then(r => {
+      setLoading(false)
+      if (r.error) { setError(r.error); return }
+      setTenants(r.data ?? [])
+      setFiltered(r.data ?? [])
+    })
+  }, [])
 
   useEffect(() => {
     const q = query.toLowerCase()
@@ -54,10 +49,6 @@ export default function SuperadminDashboard() {
     })
   }
 
-  const activeCount   = tenants.filter(t => t.active).length
-  const inactiveCount = tenants.filter(t => !t.active).length
-  const salesTotal    = tenants.reduce((s, t) => s + t.total_sales, 0)
-
   return (
     <div className="space-y-5 p-4 sm:p-6">
 
@@ -66,34 +57,15 @@ export default function SuperadminDashboard() {
         <div>
           <h1 className="text-xl font-bold text-gray-900">Clientes</h1>
           <p className="mt-0.5 text-[13px] text-gray-500">
-            {tenants.length} {tenants.length === 1 ? 'cliente registrado' : 'clientes registrados'}
+            {tenants.length} {tenants.length === 1 ? 'cliente' : 'clientes'}
           </p>
         </div>
         <Link
           href="/superadmin/tenants/new"
           className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-600 sm:w-auto"
         >
-          <Plus className="size-4" />
-          Nuevo cliente
+          <Plus className="size-4" /> Nuevo cliente
         </Link>
-      </div>
-
-      {/* KPIs */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {[
-          { label: 'Total',    value: tenants.length, Icon: Building2,  c: 'text-blue-600',   bg: 'bg-blue-50' },
-          { label: 'Activos',  value: activeCount,    Icon: CheckCircle, c: 'text-green-600', bg: 'bg-green-50' },
-          { label: 'Inactivos',value: inactiveCount,  Icon: XCircle,    c: 'text-red-500',   bg: 'bg-red-50' },
-          { label: 'Ventas',   value: fmt(salesTotal),Icon: TrendingUp,  c: 'text-purple-600',bg: 'bg-purple-50' },
-        ].map(({ label, value, Icon, c, bg }) => (
-          <div key={label} className="rounded-xl border border-[#E5E7EB] bg-white p-3.5 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-gray-500">{label}</span>
-              <div className={`rounded-lg p-1.5 ${bg}`}><Icon className={`size-3.5 ${c}`} /></div>
-            </div>
-            <p className="mt-2.5 text-base font-bold text-gray-900 sm:text-lg">{value}</p>
-          </div>
-        ))}
       </div>
 
       {/* Search */}
@@ -102,23 +74,22 @@ export default function SuperadminDashboard() {
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder="Buscar por nombre, email…"
+          placeholder="Buscar por nombre o email…"
           className="w-full rounded-lg border border-gray-300 bg-white py-2.5 pl-9 pr-4 text-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
         />
       </div>
 
-      {/* Content */}
       {loading ? (
         <div className="flex justify-center py-16"><Loader2 className="size-6 animate-spin text-blue-500" /></div>
       ) : error ? (
         <div className="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-600">{error}</div>
       ) : filtered.length === 0 ? (
         <div className="rounded-xl border border-[#E5E7EB] bg-white py-14 text-center text-sm text-gray-500">
-          {query ? 'Sin resultados' : 'No hay clientes registrados aún'}
+          {query ? 'Sin resultados' : 'No hay clientes registrados'}
         </div>
       ) : (
         <>
-          {/* Desktop table */}
+          {/* Desktop */}
           <div className="hidden overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-sm lg:block">
             <table className="w-full text-sm">
               <thead>
@@ -142,11 +113,11 @@ export default function SuperadminDashboard() {
                     </td>
                     <td className="px-4 py-3 text-gray-500">{t.admin_email ?? t.email}</td>
                     <td className="px-4 py-3 text-gray-500">{format(new Date(t.created_at), 'd MMM yyyy', { locale: es })}</td>
-                    <td className="px-4 py-3">
-                      <span className="flex items-center gap-1 text-gray-600"><Users className="size-3 text-gray-400" />{t.user_count}</span>
+                    <td className="px-4 py-3 text-gray-600">
+                      <span className="flex items-center gap-1"><Users className="size-3 text-gray-400" />{t.user_count}</span>
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="flex items-center gap-1 text-gray-600"><Package className="size-3 text-gray-400" />{t.product_count}</span>
+                    <td className="px-4 py-3 text-gray-600">
+                      <span className="flex items-center gap-1"><Package className="size-3 text-gray-400" />{t.product_count}</span>
                     </td>
                     <td className="px-4 py-3">
                       <button
@@ -191,9 +162,8 @@ export default function SuperadminDashboard() {
                   <button
                     onClick={() => handleToggle(t)}
                     disabled={toggling === t.id}
-                    className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${t.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${t.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
                   >
-                    {toggling === t.id && <Loader2 className="size-3 animate-spin" />}
                     {t.active ? 'Activo' : 'Inactivo'}
                   </button>
                 </div>
@@ -201,9 +171,7 @@ export default function SuperadminDashboard() {
                   <div><p className="text-[11px] text-gray-400">Usuarios</p><p className="text-sm font-semibold">{t.user_count}</p></div>
                   <div><p className="text-[11px] text-gray-400">Productos</p><p className="text-sm font-semibold">{t.product_count}</p></div>
                 </div>
-                <p className="mt-1.5 text-center text-[11px] text-gray-400">
-                  Registrado {format(new Date(t.created_at), 'd MMM yyyy', { locale: es })}
-                </p>
+                <p className="mt-1.5 text-center text-[11px] text-gray-400">Desde {format(new Date(t.created_at), 'd MMM yyyy', { locale: es })}</p>
                 <Link
                   href={`/superadmin/tenants/${t.id}`}
                   className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 py-2 text-[13px] font-medium text-gray-600 hover:bg-gray-50"

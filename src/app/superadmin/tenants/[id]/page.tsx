@@ -1,272 +1,234 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
-  ArrowLeft,
-  Building2,
-  Users,
-  Package,
-  TrendingUp,
-  CheckCircle,
-  XCircle,
-  Loader2,
-  Edit2,
-  Save,
-  X,
-  Upload,
-  ShieldAlert,
+  ArrowLeft, Users, Package, TrendingUp,
+  CheckCircle, XCircle, Loader2, Edit2, Save, X,
 } from 'lucide-react'
 import Link from 'next/link'
-import { getTenant, toggleTenantStatus, updateTenantInfo } from '@/app/actions/superadmin'
-import type { Tenant, User } from '@/types/database'
+import {
+  getTenant, getTenantProducts, toggleTenantStatus, updateTenantInfo,
+  type TenantDetail, type ProductRow,
+} from '@/app/actions/superadmin'
+import type { User } from '@/types/database'
 import ProductImport from './_components/product-import'
 
-const clp = (n: number) =>
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const fmt = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n)
-
-const editSchema = z.object({
-  name: z.string().min(2, 'Mínimo 2 caracteres').max(100),
-  email: z.string().email('Email inválido'),
-  phone: z.string().optional().nullable(),
-  address: z.string().optional().nullable(),
-})
-
-type EditFormData = z.infer<typeof editSchema>
 
 const inputCls =
   'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20'
 
-function UserRoleBadge({ role }: { role: string }) {
+const editSchema = z.object({
+  name:    z.string().min(2).max(100),
+  email:   z.string().email(),
+  phone:   z.string().nullish(),
+  address: z.string().nullish(),
+})
+type EditForm = z.infer<typeof editSchema>
+
+// ─── Tabs ─────────────────────────────────────────────────────────────────────
+
+type Tab = 'info' | 'productos' | 'usuarios'
+
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'info',      label: 'Información' },
+  { key: 'productos', label: 'Productos'   },
+  { key: 'usuarios',  label: 'Usuarios'    },
+]
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function RoleBadge({ role }: { role: string }) {
   return (
-    <span
-      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ${
-        role === 'admin'
-          ? 'bg-blue-100 text-blue-700'
-          : 'bg-gray-100 text-gray-600'
-      }`}
-    >
+    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ${role === 'admin' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
       {role}
     </span>
   )
 }
 
+function StatusBadge({ active }: { active: boolean }) {
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+      {active ? 'Activo' : 'Inactivo'}
+    </span>
+  )
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export default function TenantDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const router = useRouter()
 
-  const [tenant, setTenant] = useState<Tenant | null>(null)
-  const [users, setUsers] = useState<User[]>([])
-  const [productCount, setProductCount] = useState(0)
-  const [totalSales, setTotalSales] = useState(0)
-  const [isLoading, setIsLoading] = useState(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const [detail, setDetail]         = useState<TenantDetail | null>(null)
+  const [products, setProducts]     = useState<ProductRow[]>([])
+  const [loadingMain, setLoadingMain]   = useState(true)
+  const [loadingProds, setLoadingProds] = useState(false)
+  const [mainError, setMainError]   = useState<string | null>(null)
+  const [activeTab, setActiveTab]   = useState<Tab>('info')
 
-  const [isEditing, setIsEditing] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
+  const [isEditing, setIsEditing]   = useState(false)
+  const [saveError, setSaveError]   = useState<string | null>(null)
+  const [toggling, setToggling]     = useState(false)
   const [, startSave] = useTransition()
 
-  const [togglingStatus, setTogglingStatus] = useState(false)
+  const { register, handleSubmit, reset, formState: { errors, isSubmitting } } =
+    useForm<EditForm>({ resolver: zodResolver(editSchema) })
 
-  const [activeTab, setActiveTab] = useState<'info' | 'usuarios' | 'importar'>('info')
-
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors, isSubmitting },
-  } = useForm<EditFormData>({ resolver: zodResolver(editSchema) })
-
-  const load = async () => {
-    setIsLoading(true)
-    const result = await getTenant(id)
-    setIsLoading(false)
-    if (result.error || !result.data) {
-      setLoadError(result.error ?? 'Sin datos')
-      return
-    }
-    const { tenant, users, product_count, total_sales } = result.data
-    setTenant(tenant)
-    setUsers(users)
-    setProductCount(product_count)
-    setTotalSales(total_sales)
-    reset({
-      name: tenant.name,
-      email: tenant.email,
-      phone: tenant.phone ?? '',
-      address: tenant.address ?? '',
+  // Load tenant detail
+  useEffect(() => {
+    setLoadingMain(true)
+    getTenant(id).then(r => {
+      setLoadingMain(false)
+      if (r.error || !r.data) { setMainError(r.error ?? 'Sin datos'); return }
+      setDetail(r.data)
+      const t = r.data.tenant
+      reset({ name: t.name, email: t.email, phone: t.phone ?? '', address: t.address ?? '' })
     })
-  }
+  }, [id])
 
-  useEffect(() => { load() }, [id])
-
-  const onSave = (data: EditFormData) => {
-    setSaveError(null)
-    startSave(async () => {
-      const result = await updateTenantInfo(id, data)
-      if (result.error) {
-        setSaveError(result.error)
-      } else {
-        setTenant((prev) => prev ? { ...prev, ...data } : prev)
-        setIsEditing(false)
-      }
+  // Load products when tab switches
+  useEffect(() => {
+    if (activeTab !== 'productos' || products.length) return
+    setLoadingProds(true)
+    getTenantProducts(id).then(r => {
+      setLoadingProds(false)
+      if (!r.error) setProducts(r.data ?? [])
     })
-  }
+  }, [activeTab])
 
   const handleToggle = async () => {
-    if (!tenant) return
-    setTogglingStatus(true)
-    await toggleTenantStatus(tenant.id, !tenant.active)
-    setTenant((prev) => prev ? { ...prev, active: !prev.active } : prev)
-    setTogglingStatus(false)
+    if (!detail) return
+    setToggling(true)
+    await toggleTenantStatus(detail.tenant.id, !detail.tenant.active)
+    setDetail(prev => prev ? { ...prev, tenant: { ...prev.tenant, active: !prev.tenant.active } } : prev)
+    setToggling(false)
   }
 
-  if (isLoading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <Loader2 className="size-6 animate-spin text-blue-500" />
-      </div>
-    )
+  const onSave = (data: EditForm) => {
+    setSaveError(null)
+    startSave(async () => {
+      const r = await updateTenantInfo(id, data)
+      if (r.error) { setSaveError(r.error); return }
+      setDetail(prev => prev ? { ...prev, tenant: { ...prev.tenant, ...data } } : prev)
+      setIsEditing(false)
+    })
   }
 
-  if (loadError || !tenant) {
+  // ── Loading / error states ────────────────────────────────────────────────
+
+  if (loadingMain) {
+    return <div className="flex h-64 items-center justify-center"><Loader2 className="size-6 animate-spin text-blue-500" /></div>
+  }
+  if (mainError || !detail) {
     return (
       <div className="p-6">
-        <div className="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-600">
-          {loadError ?? 'Tenant no encontrado'}
-        </div>
+        <div className="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-600">{mainError ?? 'Tenant no encontrado'}</div>
       </div>
     )
   }
 
+  const { tenant, users, product_count, total_sales } = detail
+
   return (
-    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6">
+    <div className="space-y-5 p-4 sm:p-6">
+
       {/* Back + header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <Link
-            href="/superadmin/dashboard"
-            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900"
-          >
-            <ArrowLeft className="size-4" />
-            Volver
+          <Link href="/superadmin/tenants" className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900">
+            <ArrowLeft className="size-4" /> Volver
           </Link>
           <div className="h-4 w-px bg-gray-200" />
           <div className="flex items-center gap-2.5">
-            {tenant.logo_url ? (
-              <img src={tenant.logo_url} alt="" className="size-9 rounded-md object-cover" />
-            ) : (
-              <div className="flex size-9 items-center justify-center rounded-md bg-blue-100 text-sm font-bold text-blue-700">
-                {tenant.name.slice(0, 2).toUpperCase()}
-              </div>
-            )}
+            {tenant.logo_url
+              ? <img src={tenant.logo_url} alt="" className="size-9 rounded-md object-cover" />
+              : <div className="flex size-9 items-center justify-center rounded-md bg-blue-100 text-sm font-bold text-blue-700">{tenant.name.slice(0,2).toUpperCase()}</div>
+            }
             <div>
               <h1 className="text-lg font-bold text-gray-900">{tenant.name}</h1>
-              <p className="text-[12px] text-gray-400">
-                Registrado {format(new Date(tenant.created_at), "d 'de' MMMM yyyy", { locale: es })}
-              </p>
+              <p className="text-[12px] text-gray-400">Desde {format(new Date(tenant.created_at), "d 'de' MMMM yyyy", { locale: es })}</p>
             </div>
           </div>
         </div>
 
         <button
           onClick={handleToggle}
-          disabled={togglingStatus}
-          className={`flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors sm:w-auto ${
-            tenant.active
-              ? 'bg-red-50 text-red-600 hover:bg-red-100'
-              : 'bg-green-50 text-green-700 hover:bg-green-100'
-          }`}
+          disabled={toggling}
+          className={`flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors sm:w-auto ${tenant.active ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}
         >
-          {togglingStatus ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : tenant.active ? (
-            <XCircle className="size-4" />
-          ) : (
-            <CheckCircle className="size-4" />
-          )}
-          {tenant.active ? 'Desactivar cliente' : 'Activar cliente'}
+          {toggling ? <Loader2 className="size-4 animate-spin" /> : tenant.active ? <XCircle className="size-4" /> : <CheckCircle className="size-4" />}
+          {tenant.active ? 'Desactivar' : 'Activar'}
         </button>
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { label: 'Estado', value: tenant.active ? 'Activo' : 'Inactivo', Icon: tenant.active ? CheckCircle : XCircle, color: tenant.active ? 'text-green-600' : 'text-red-500', bg: tenant.active ? 'bg-green-50' : 'bg-red-50' },
-          { label: 'Usuarios', value: users.length, Icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
-          { label: 'Productos', value: productCount, Icon: Package, color: 'text-purple-600', bg: 'bg-purple-50' },
-          { label: 'Ventas totales', value: clp(totalSales), Icon: TrendingUp, color: 'text-orange-600', bg: 'bg-orange-50' },
-        ].map(({ label, value, Icon, color, bg }) => (
-          <div key={label} className="rounded-xl border border-[#E5E7EB] bg-white p-3.5 shadow-sm sm:p-4">
+          { label: 'Estado',    value: tenant.active ? 'Activo' : 'Inactivo', Icon: tenant.active ? CheckCircle : XCircle, c: tenant.active ? 'text-green-600' : 'text-red-500', bg: tenant.active ? 'bg-green-50' : 'bg-red-50' },
+          { label: 'Usuarios',  value: users.length,  Icon: Users,    c: 'text-blue-600',   bg: 'bg-blue-50' },
+          { label: 'Productos', value: product_count, Icon: Package,  c: 'text-purple-600', bg: 'bg-purple-50' },
+          { label: 'Ventas',    value: fmt(total_sales), Icon: TrendingUp, c: 'text-orange-600', bg: 'bg-orange-50' },
+        ].map(({ label, value, Icon, c, bg }) => (
+          <div key={label} className="rounded-xl border border-[#E5E7EB] bg-white p-3.5 shadow-sm">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-gray-500">{label}</span>
-              <div className={`rounded-lg p-1 sm:p-1.5 ${bg}`}>
-                <Icon className={`size-3 sm:size-3.5 ${color}`} />
-              </div>
+              <div className={`rounded-lg p-1.5 ${bg}`}><Icon className={`size-3.5 ${c}`} /></div>
             </div>
-            <p className="mt-2.5 text-base font-bold text-gray-900 sm:text-lg">{value}</p>
+            <p className="mt-2.5 text-base font-bold text-gray-900">{value}</p>
           </div>
         ))}
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 overflow-x-auto border-b border-gray-200">
-        {(['info', 'usuarios', 'importar'] as const).map((tab) => (
+      <div className="flex overflow-x-auto border-b border-gray-200">
+        {TABS.map(({ key, label }) => (
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`shrink-0 border-b-2 px-4 py-2.5 text-[13px] font-medium capitalize transition-colors ${
-              activeTab === tab
+            key={key}
+            onClick={() => setActiveTab(key)}
+            className={`shrink-0 border-b-2 px-5 py-2.5 text-[13px] font-medium transition-colors ${
+              activeTab === key
                 ? 'border-blue-500 text-blue-600'
                 : 'border-transparent text-gray-500 hover:text-gray-800'
             }`}
           >
-            {tab === 'info' ? 'Información' : tab === 'usuarios' ? 'Usuarios' : 'Importar productos'}
+            {label}
           </button>
         ))}
       </div>
 
-      {/* Tab: Info */}
+      {/* ── Tab: Info ─────────────────────────────────────────────────────── */}
       {activeTab === 'info' && (
         <div className="rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-sm sm:p-5">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-900">Información del negocio</h2>
-            {!isEditing ? (
-              <button
-                onClick={() => setIsEditing(true)}
-                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium text-blue-600 transition-colors hover:bg-blue-50"
-              >
-                <Edit2 className="size-3.5" />
-                Editar
-              </button>
-            ) : (
-              <button
-                onClick={() => { setIsEditing(false); setSaveError(null) }}
-                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium text-gray-500 transition-colors hover:bg-gray-100"
-              >
-                <X className="size-3.5" />
-                Cancelar
-              </button>
-            )}
+            {!isEditing
+              ? <button onClick={() => setIsEditing(true)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium text-blue-600 hover:bg-blue-50"><Edit2 className="size-3.5" />Editar</button>
+              : <button onClick={() => { setIsEditing(false); setSaveError(null) }} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium text-gray-500 hover:bg-gray-100"><X className="size-3.5" />Cancelar</button>
+            }
           </div>
 
           {!isEditing ? (
-            <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
+            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {[
-                { label: 'Nombre', value: tenant.name },
-                { label: 'Email', value: tenant.email },
-                { label: 'Teléfono', value: tenant.phone ?? '—' },
-                { label: 'Dirección', value: tenant.address ?? '—' },
-                { label: 'Slug', value: tenant.slug },
-              ].map(({ label, value }) => (
-                <div key={label}>
-                  <dt className="text-[11px] font-medium uppercase tracking-wide text-gray-400">{label}</dt>
-                  <dd className="mt-0.5 text-[13px] text-gray-900">{value}</dd>
+                { l: 'Nombre',    v: tenant.name },
+                { l: 'Email',     v: tenant.email },
+                { l: 'Teléfono',  v: tenant.phone ?? '—' },
+                { l: 'Dirección', v: tenant.address ?? '—' },
+                { l: 'Slug',      v: tenant.slug },
+                { l: 'Estado',    v: <StatusBadge active={tenant.active} /> },
+              ].map(({ l, v }) => (
+                <div key={l}>
+                  <dt className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{l}</dt>
+                  <dd className="mt-0.5 text-[13px] text-gray-900">{v}</dd>
                 </div>
               ))}
             </dl>
@@ -285,7 +247,7 @@ export default function TenantDetailPage() {
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700">Teléfono</label>
-                  <input {...register('phone')} className={inputCls} placeholder="+56 9 1234 5678" />
+                  <input {...register('phone')} className={inputCls} placeholder="+56 9 …" />
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700">Dirección</label>
@@ -296,52 +258,91 @@ export default function TenantDetailPage() {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-600 disabled:opacity-60"
+                className="flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-60"
               >
                 {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-                Guardar cambios
+                Guardar
               </button>
             </form>
           )}
         </div>
       )}
 
-      {/* Tab: Usuarios */}
+      {/* ── Tab: Productos ────────────────────────────────────────────────── */}
+      {activeTab === 'productos' && (
+        <div className="space-y-4">
+          {/* Product list */}
+          <div className="rounded-xl border border-[#E5E7EB] bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+              <h2 className="text-sm font-semibold text-gray-900">
+                Catálogo <span className="ml-1 text-[12px] font-normal text-gray-400">({product_count} productos)</span>
+              </h2>
+            </div>
+
+            {loadingProds ? (
+              <div className="flex justify-center py-10"><Loader2 className="size-5 animate-spin text-blue-400" /></div>
+            ) : products.length === 0 ? (
+              <p className="py-10 text-center text-sm text-gray-400">Sin productos. Importa desde Excel abajo.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-gray-50">
+                      {['Nombre', 'Categoría', 'SKU', 'Precio venta', 'Stock', 'Estado'].map(h => (
+                        <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {products.map(p => (
+                      <tr key={p.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-2.5 font-medium text-gray-900">{p.name}</td>
+                        <td className="px-4 py-2.5 text-gray-500">{p.category ?? '—'}</td>
+                        <td className="px-4 py-2.5 font-mono text-xs text-gray-400">{p.sku ?? '—'}</td>
+                        <td className="px-4 py-2.5 text-gray-900">{fmt(p.sale_price)}</td>
+                        <td className="px-4 py-2.5 text-gray-900">{p.stock_quantity}</td>
+                        <td className="px-4 py-2.5"><StatusBadge active={p.active} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Import */}
+          <ProductImport
+            tenantId={id}
+            onImported={(count) => {
+              setProducts([])
+              setDetail(prev => prev ? { ...prev, product_count: prev.product_count + count } : prev)
+            }}
+          />
+        </div>
+      )}
+
+      {/* ── Tab: Usuarios ─────────────────────────────────────────────────── */}
       {activeTab === 'usuarios' && (
         <div className="rounded-xl border border-[#E5E7EB] bg-white shadow-sm">
           {users.length === 0 ? (
-            <div className="py-12 text-center text-sm text-gray-500">Sin usuarios registrados</div>
+            <p className="py-12 text-center text-sm text-gray-500">Sin usuarios registrados</p>
           ) : (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
-                  {['Nombre', 'Email', 'Rol', 'Estado', 'Creado'].map((h) => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500">
-                      {h}
-                    </th>
+                  {['Nombre', 'Email', 'Rol', 'Estado', 'Creado'].map(h => (
+                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {users.map((u) => (
+                {(users as User[]).map(u => (
                   <tr key={u.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium text-gray-900">{u.full_name}</td>
                     <td className="px-4 py-3 text-gray-500">{u.email}</td>
-                    <td className="px-4 py-3">
-                      <UserRoleBadge role={u.role} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                          u.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                        }`}
-                      >
-                        {u.active ? 'Activo' : 'Inactivo'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-400">
-                      {format(new Date(u.created_at), 'd MMM yyyy', { locale: es })}
-                    </td>
+                    <td className="px-4 py-3"><RoleBadge role={u.role} /></td>
+                    <td className="px-4 py-3"><StatusBadge active={u.active} /></td>
+                    <td className="px-4 py-3 text-gray-400">{format(new Date(u.created_at), 'd MMM yyyy', { locale: es })}</td>
                   </tr>
                 ))}
               </tbody>
@@ -350,10 +351,6 @@ export default function TenantDetailPage() {
         </div>
       )}
 
-      {/* Tab: Importar productos */}
-      {activeTab === 'importar' && (
-        <ProductImport tenantId={id} />
-      )}
     </div>
   )
 }
