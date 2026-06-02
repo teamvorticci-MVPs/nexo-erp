@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { createBrowserClient } from '@supabase/ssr'
 import { createClient } from '@/lib/supabase/client'
 import { useAuthStore } from '@/stores/auth-store'
+import { registerSale as registerSaleAction } from '@/app/actions/sales'
 import type { Product, PaymentMethod } from '@/types/database'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -17,15 +17,6 @@ export type CartItem = {
 
 // IVA Chile 19%
 export const TAX_RATE = 0.19
-
-// ─── Raw client (avoids RejectExcessProperties<never> on insert) ──────────────
-
-function getRawClient() {
-  return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-  )
-}
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
@@ -130,51 +121,36 @@ export function useSales() {
       setRegisterError(null)
       setRegisterSuccess(false)
 
-      const raw = getRawClient()
-
-      const { data: saleData, error: saleError } = await raw
-        .from('sales')
-        .insert({
-          tenant_id: tenant.id,
-          user_id: user.id,
-          cash_register_id: cashRegisterId ?? null,
-          status: 'completada',
-          payment_method: paymentMethod,
-          subtotal,
-          discount_amount: 0,
-          tax_amount: taxAmount,
-          total,
-          total_cost: totalCost,
-        })
-        .select('id')
-        .single()
-
-      if (saleError) {
-        setIsRegistering(false)
-        setRegisterError(saleError.message)
-        return { error: saleError.message }
-      }
-
-      const saleId = (saleData as { id: string }).id
-
-      const items = cart.map((item) => ({
-        tenant_id: tenant.id,
-        sale_id: saleId,
-        product_id: item.productId,
-        quantity: item.quantity,
-        unit_price: item.unitPrice,
-        unit_cost: item.unitCost,
-        discount_pct: 0,
-      }))
-
-      const { error: itemsError } = await raw.from('sale_items').insert(items)
+      const result = await registerSaleAction({
+        cashRegisterId,
+        paymentMethod,
+        subtotal,
+        taxAmount,
+        total,
+        totalCost,
+        items: cart.map((item) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          unitCost: item.unitCost,
+        })),
+      })
 
       setIsRegistering(false)
 
-      if (itemsError) {
-        setRegisterError(itemsError.message)
-        return { error: itemsError.message }
+      if (result.error) {
+        setRegisterError(result.error)
+        return { error: result.error }
       }
+
+      // Update local product stock so the grid reflects the new quantities immediately
+      setProducts((prev) =>
+        prev.map((p) => {
+          const sold = cart.find((i) => i.productId === p.id)
+          if (!sold) return p
+          return { ...p, stock_quantity: Math.max(0, p.stock_quantity - sold.quantity) }
+        }),
+      )
 
       setRegisterSuccess(true)
       clearCart()
