@@ -426,6 +426,14 @@ export interface Database {
   }
 }
 
+// ─── Superadmin ───────────────────────────────────────────────────────────────
+
+export interface Superadmin {
+  id: string
+  email: string
+  created_at: string
+}
+
 // ─── Utilidades de tipo ───────────────────────────────────────────────────────
 
 /** Extrae el tipo Row de una tabla. Ejemplo: Tables<'products'> */
