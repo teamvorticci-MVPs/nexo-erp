@@ -22,10 +22,10 @@ async function assertSuperadmin() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('No autenticado')
 
-  const admin = getAdmin()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await admin.from('superadmins' as any).select('id').eq('id', user.id).single()
-  if (!data) throw new Error('Acceso denegado')
+  const allowed = process.env.SUPERADMIN_EMAIL
+  if (!allowed || user.email?.toLowerCase() !== allowed.toLowerCase()) {
+    throw new Error('Acceso denegado')
+  }
 }
 
 // ─── Shared result type ───────────────────────────────────────────────────────

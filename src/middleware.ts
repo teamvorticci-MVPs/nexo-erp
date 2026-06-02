@@ -32,6 +32,12 @@ function isSuperadminPath(pathname: string) {
   return pathname === '/superadmin' || pathname.startsWith('/superadmin/')
 }
 
+function isSuperadminEmail(email: string | undefined): boolean {
+  const allowed = process.env.SUPERADMIN_EMAIL
+  if (!allowed || !email) return false
+  return email.toLowerCase() === allowed.toLowerCase()
+}
+
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
@@ -72,29 +78,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard', request.url))
   }
 
-  // Proteger /superadmin/* — solo usuarios en tabla superadmins
+  // Proteger /superadmin/* — solo el email definido en SUPERADMIN_EMAIL
   if (user && isSuperadminPath(pathname)) {
-    const { data: superadmin } = await supabase
-      .from('superadmins')
-      .select('id')
-      .eq('id', user.id)
-      .single()
-
-    if (!superadmin) {
+    if (!isSuperadminEmail(user.email)) {
       return NextResponse.redirect(new URL('/dashboard', request.url))
-    }
-  }
-
-  // Superadmin que va a /dashboard → redirigir a /superadmin/dashboard
-  if (user && pathname === '/dashboard') {
-    const { data: superadmin } = await supabase
-      .from('superadmins')
-      .select('id')
-      .eq('id', user.id)
-      .single()
-
-    if (superadmin) {
-      return NextResponse.redirect(new URL('/superadmin/dashboard', request.url))
     }
   }
 
